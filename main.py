@@ -1,3 +1,4 @@
+
 import os, sys
 import numpy as np
 import torch
@@ -12,7 +13,6 @@ from tqdm import tqdm
 from src.datasets import ThingsMEGDataset
 from src.models import BasicConvClassifier
 from src.utils import set_seed
-
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(args: DictConfig):
@@ -29,8 +29,10 @@ def run(args: DictConfig):
     
     train_set = ThingsMEGDataset("train", args.data_dir)
     train_loader = torch.utils.data.DataLoader(train_set, shuffle=True, **loader_args)
+
     val_set = ThingsMEGDataset("val", args.data_dir)
     val_loader = torch.utils.data.DataLoader(val_set, shuffle=False, **loader_args)
+    
     test_set = ThingsMEGDataset("test", args.data_dir)
     test_loader = torch.utils.data.DataLoader(
         test_set, shuffle=False, batch_size=args.batch_size, num_workers=args.num_workers
@@ -47,6 +49,7 @@ def run(args: DictConfig):
     #     Optimizer
     # ------------------
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)  # learning rate scheduler
 
     # ------------------
     #   Start training
@@ -88,16 +91,14 @@ def run(args: DictConfig):
             val_acc.append(accuracy(y_pred, y).item())
 
         print(f"Epoch {epoch+1}/{args.epochs} | train loss: {np.mean(train_loss):.3f} | train acc: {np.mean(train_acc):.3f} | val loss: {np.mean(val_loss):.3f} | val acc: {np.mean(val_acc):.3f}")
-        torch.save(model.state_dict(), os.path.join(logdir, "model_last.pt"))
-        if args.use_wandb:
-            wandb.log({"train_loss": np.mean(train_loss), "train_acc": np.mean(train_acc), "val_loss": np.mean(val_loss), "val_acc": np.mean(val_acc)})
         
+        scheduler.step(np.mean(val_loss))  # learning rate scheduler
+
         if np.mean(val_acc) > max_val_acc:
+            max_val_acc = np.mean(val_acc)
             cprint("New best.", "cyan")
             torch.save(model.state_dict(), os.path.join(logdir, "model_best.pt"))
-            max_val_acc = np.mean(val_acc)
-            
-    
+
     # ----------------------------------
     #  Start evaluation with best model
     # ----------------------------------
@@ -111,7 +112,6 @@ def run(args: DictConfig):
     preds = torch.cat(preds, dim=0).numpy()
     np.save(os.path.join(logdir, "submission"), preds)
     cprint(f"Submission {preds.shape} saved at {logdir}", "cyan")
-
 
 if __name__ == "__main__":
     run()
